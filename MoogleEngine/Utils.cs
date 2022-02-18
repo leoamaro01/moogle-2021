@@ -95,17 +95,28 @@ internal static class Utils
 
         return result;
     }
+    private static bool CharFilter(char c) => char.IsLetterOrDigit(c);
+    private static char CharMap(char c) => c.ToString().Normalize(System.Text.NormalizationForm.FormD)[0];
+    public static void ForEachFilteredParagraphInFile(string filePath, Action<string> action)
+    => SeparateTextInFile(filePath, c => c == '\n', action, CharFilter, CharMap);
+    public static void ForEachRawParagraphInFile(string filePath, Action<string> action)
+    => SeparateTextInFile(filePath, c => c == '\n', action, c => true, c => c);
     public static void ForEachWordInFile(string filePath, Action<string> action)
+    => SeparateTextInFile(filePath, char.IsWhiteSpace, action, CharFilter, CharMap);
+    public static void SeparateTextInFile(string filePath, Func<char, bool> isSeparator, Action<string> action, Func<char, bool> filter, Func<char, char> map)
     {
         using StreamReader reader = new(filePath);
 
         string currentWord = "";
-        while (reader.Peek() >= 0)
+        while (!reader.EndOfStream)
         {
-            char c = (char)reader.Read();
-            if (c == ' ')
+            char c = map(char.ToLower((char)reader.Read()));
+
+            if (!filter(c))
+                continue;
+            if (isSeparator(c))
             {
-                if (currentWord != "")
+                if (currentWord == "")
                     action(currentWord);
 
                 currentWord = "";

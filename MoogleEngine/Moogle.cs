@@ -8,6 +8,8 @@ namespace MoogleEngine;
 
 public static class Moogle
 {
+    const int CHARACTERS_PER_SNIPPET = 256;
+    const int LAST_SNIPPET_WORD_MAX_LENGTH = 16;
     static readonly string[] vocabulary;
     static readonly string[] corpusFiles;
     static readonly Matrix<double> weightedCorpus;
@@ -35,7 +37,7 @@ public static class Moogle
         // Now we all distinct words to the vocabulary.
         for (int i = 0; i < corpusFiles.Length; i++)
         {
-            Console.WriteLine($"Reading... ({(float)i / corpusFiles.Length * 100}%)");
+            Console.WriteLine($"Reading... ({(float)i / corpusFiles.Length * 100}%) {tempVocabulary.Count} words found.");
 
             rawFrequenciesDicts[i] = new();
 
@@ -56,7 +58,8 @@ public static class Moogle
                                else
                                    rawFrequenciesDicts[i].Add(termIndex, 1);
                            }
-                       });
+                       }
+                       );
         }
         Console.WriteLine("Read all files in " + stopwatch.ElapsedMilliseconds + "ms");
         stopwatch.Restart();
@@ -154,14 +157,54 @@ public static class Moogle
 
             result.Add(new SearchItem(
                 Path.GetFileNameWithoutExtension(corpusFiles[i]),
-                GetSnippet(terms.Select(t => t.Key).ToArray(), corpusFiles[i]),
+                GetSnippet(weightedQuery, corpusFiles[i]),
                 (float)cosines[i]));
         }
-
-        return result.ToArray();
+        return result.OrderByDescending(item => item.Score).ToArray();
     }
-    private static string GetSnippet(string[] keywords, string documentPath)
+    private static string GetSnippet(Vector<double> weightedQuery, string documentPath)
     {
-        return "TODO: Snippet creation.";
+        List<string> docList = new();
+        ForEachFilteredParagraphInFile(documentPath, p => docList.Add(p));
+
+        //Finding raw frequencies for each term in each paragraph
+        Matrix<int> rawParagraphFrequencies = new(vocabulary.Length, docList.Count);
+        for (int i = 0; i < rawParagraphFrequencies.Height; i++)
+        {
+            string[] splitParagraph = docList[i].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            for (int e = 0; e < splitParagraph.Length; e++)
+                rawParagraphFrequencies[Array.IndexOf(vocabulary, splitParagraph[e]), i] += 1;
+        }
+
+        Matrix<double> weightedDocument = GetCorpusTFIDF(rawParagraphFrequencies);
+        Vector<double>[] weightedRows = weightedDocument.GetAllRows();
+
+        double[] docScores = new double[weightedRows.Length];
+        for (int i = 0; i < docScores.Length; i++)
+            docScores[i] = VectorMath.GetCosineSimilarity(weightedRows[i], weightedQuery);
+
+        List<string> rawParagraphs = new();
+        // ostritch philosophy was here
+        ForEachRawParagraphInFile(documentPath, p => rawParagraphs.Add(p));
+        string bestParagraph = rawParagraphs[Array.IndexOf(docScores, docScores.Max())];
+
+        if (bestParagraph.Length > CHARACTERS_PER_SNIPPET)
+        {
+            string cutParagraph = "";
+
+            for (int i = 0; i < CHARACTERS_PER_SNIPPET; i++)
+            {
+                if (i > CHARACTERS_PER_SNIPPET - LAST_SNIPPET_WORD_MAX_LENGTH && bestParagraph[i] == ' ')
+                    break;
+
+                cutParagraph += bestParagraph[i];
+            }
+
+            cutParagraph += "(...)";
+
+            return cutParagraph;
+        }
+
+        return bestParagraph;
     }
 }

@@ -10,11 +10,13 @@ namespace MoogleEngine
         public static double GetCosineSimilarity(Vector<double> lhs, Vector<double> rhs)
         {
             double dot = DotProduct(lhs, rhs);
-            Console.WriteLine($"Dot {dot}");
+            if (dot == 0) return 0;
+
             double lNorm = Norm(lhs);
-            Console.WriteLine($"LNorm {lNorm}");
+            if (lNorm == 0) return 0;
+
             double rNorm = Norm(rhs);
-            Console.WriteLine($"RNorm {rNorm}");
+            if (rNorm == 0) return 0;
 
             return dot / (lNorm * rNorm);
         }

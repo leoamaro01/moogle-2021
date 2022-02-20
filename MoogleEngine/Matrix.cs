@@ -1,7 +1,8 @@
 namespace MoogleEngine
 {
-    public class Matrix<T>
+    public class Matrix<T> : IEnumerable<T>
     {
+        //TODO: Support for empty matrix.
         private readonly T[] _items;
 
         public T this[int x, int y]
@@ -94,6 +95,16 @@ namespace MoogleEngine
             }
 
             return result;
+        }
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            return ((IEnumerable<T>)_items).GetEnumerator();
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+        {
+            return _items.GetEnumerator();
         }
     }
 }

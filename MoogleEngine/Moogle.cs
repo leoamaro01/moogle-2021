@@ -1,4 +1,6 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Reflection.Metadata;
+using System.Net.Mime;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using Microsoft.VisualBasic.CompilerServices;
@@ -44,7 +46,6 @@ public static class Moogle
             ForEachWordInFile(corpusFiles[i],
                        word =>
                        {
-                           word = Regex.Replace(word, @"\W+", "");
                            if (!tempVocabulary.Contains(word))
                            {
                                tempVocabulary.Add(word);
@@ -89,42 +90,66 @@ public static class Moogle
     }
     public static SearchResult Query(string query)
     {
+        char[] operators = { '*' };
         Console.WriteLine($"Searched {query}");
 
-        string[] queryTerms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                                    .Where(w => vocabulary.Contains(w)).ToArray();
+        List<string> queryTerms = new();
 
-        if (queryTerms.Length == 0)
+        SeparateTextInString(query,
+            isSeparator: char.IsWhiteSpace,
+            action: word =>
+                    {
+                        queryTerms.Add(word);
+                    },
+            filter: c => CharFilter(c) || operators.Contains(c),
+            map: CharMap);
+        // query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        //                             .Where(w => vocabulary.Contains(w)).ToArray();
+
+        //TODO: Search for alternatives in input
+        if (queryTerms.Count == 0)
             return new SearchResult();
 
         System.Console.WriteLine("Split terms");
 
         Dictionary<string, int> rawQuery = new();
 
-        foreach (string term in queryTerms)
+        for (int i = 0; i < queryTerms.Count; i++)
         {
+            string term = queryTerms[i];
+
             int starCount = 0;
-            foreach (char c in term)
-                if (c == '*')
-                    starCount++;
+            if (term.StartsWith('*'))
+                foreach (char c in term)
+                    if (c == '*')
+                        starCount++;
+                    else
+                        break;
+
+            // filter stars out of the term
+            queryTerms[i] = term[starCount..];
+
+            if (vocabulary.Contains(queryTerms[i]))
+                if (rawQuery.ContainsKey(queryTerms[i]))
+                    rawQuery[queryTerms[i]] += 1 + starCount;
                 else
-                    break;
-
-            if (rawQuery.ContainsKey(term))
-                rawQuery[term] += 1 + starCount;
+                    rawQuery.Add(queryTerms[i], 1 + starCount);
             else
-                rawQuery.Add(term, 1 + starCount);
+            {
+                queryTerms.RemoveAt(i);
+                i--;
+                continue;
+            }
         }
-
         return new SearchResult(StrictQuery(rawQuery.ToArray()));
     }
 
-    const double minSmilarity = 0;
+    const double MIN_SIMILARITY = 0.01;
     // Notes:
     // Strict query assumes all terms are in the vocabulary.
     private static SearchItem[] StrictQuery(KeyValuePair<string, int>[] terms)
     {
-        System.Console.WriteLine("Invoked StrictQuery");
+        Console.WriteLine("Invoked StrictQuery");
 
         List<string> vocabularyList = vocabulary.ToList();
         Vector<int> rawQuery = new(vocabulary.Length);
@@ -138,22 +163,18 @@ public static class Moogle
         Vector<double>[] documents = weightedCorpus.GetAllRows();
         double[] cosines = new double[weightedCorpus.Height];
 
-
         System.Console.WriteLine("Finding cosine similarity");
         for (int i = 0; i < cosines.Length; i++)
         {
-            Console.WriteLine($"Finding cosine similarity for document {i} ({(float)i / cosines.Length * 100}%)");
-            cosines[i] = VectorMath.GetCosineSimilarity(documents[i], weightedQuery);
+            cosines[i] = VectorMath.GetCosineSimilarity(documents[i], weightedQuery, MIN_SIMILARITY);
         }
 
         List<SearchItem> result = new();
 
         for (int i = 0; i < cosines.Length; i++)
         {
-            if (cosines[i] <= minSmilarity)
+            if (cosines[i] <= MIN_SIMILARITY)
                 continue;
-
-            Console.WriteLine($"Document {i} similarity: {cosines[i]}");
 
             result.Add(new SearchItem(
                 Path.GetFileNameWithoutExtension(corpusFiles[i]),
@@ -165,13 +186,17 @@ public static class Moogle
     private static string GetSnippet(Vector<double> weightedQuery, string documentPath)
     {
         List<string> docList = new();
-        ForEachFilteredParagraphInFile(documentPath, p => docList.Add(p));
+        ForEachFilteredParagraphInFile(documentPath, p =>
+        {
+            if (p.Any(char.IsLetterOrDigit))
+                docList.Add(p);
+        });
 
         //Finding raw frequencies for each term in each paragraph
         Matrix<int> rawParagraphFrequencies = new(vocabulary.Length, docList.Count);
         for (int i = 0; i < rawParagraphFrequencies.Height; i++)
         {
-            string[] splitParagraph = docList[i].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            string[] splitParagraph = docList[i].Split((char[]?)null, options: StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             for (int e = 0; e < splitParagraph.Length; e++)
                 rawParagraphFrequencies[Array.IndexOf(vocabulary, splitParagraph[e]), i] += 1;
         }
@@ -185,7 +210,11 @@ public static class Moogle
 
         List<string> rawParagraphs = new();
         // ostritch philosophy was here
-        ForEachRawParagraphInFile(documentPath, p => rawParagraphs.Add(p));
+        ForEachRawParagraphInFile(documentPath, p =>
+        {
+            if (p.Any(char.IsLetterOrDigit))
+                rawParagraphs.Add(p);
+        });
         string bestParagraph = rawParagraphs[Array.IndexOf(docScores, docScores.Max())];
 
         if (bestParagraph.Length > CHARACTERS_PER_SNIPPET)

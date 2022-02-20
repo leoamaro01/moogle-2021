@@ -7,29 +7,34 @@ namespace MoogleEngine
 {
     public static class VectorMath
     {
-        public static double GetCosineSimilarity(Vector<double> lhs, Vector<double> rhs)
+        public static double GetCosineSimilarity(in Vector<double> lhs, in Vector<double> rhs, in double epsilon = 0)
         {
             double dot = DotProduct(lhs, rhs);
-            if (dot == 0) return 0;
+            if (dot <= epsilon) return 0;
 
             double lNorm = Norm(lhs);
-            if (lNorm == 0) return 0;
+            if (lNorm <= epsilon) return 0;
 
             double rNorm = Norm(rhs);
-            if (rNorm == 0) return 0;
+            if (rNorm <= epsilon) return 0;
 
             return dot / (lNorm * rNorm);
         }
-        public static double DotProduct(Vector<double> lhs, Vector<double> rhs)
+        public static double DotProduct(in Vector<double> lhs, in Vector<double> rhs)
         {
-            return lhs.Length != rhs.Length
-                ? throw new ArgumentException($"{nameof(lhs)} and {nameof(rhs)} vectors length mismatch.")
-                : lhs.Zip(rhs).Select(tuple => tuple.First * tuple.Second).Sum();
+            if (lhs.Length != rhs.Length)
+                throw new ArgumentException($"{nameof(lhs)} and {nameof(rhs)} vectors length mismatch.");
+
+            double result = 0;
+            for (int i = 0; i < lhs.Length; i++)
+                result += lhs[i] * rhs[i];
+
+            return result;
         }
-        public static double Norm(Vector<double> vector)
+        public static double Norm(in Vector<double> vector)
         {
             // The norm of a vector is the square root of the sum of the square of its elements
-            return Math.Sqrt(vector._items.Sum(el => el * el));
+            return Math.Sqrt(DotProduct(vector, vector));
         }
     }
 }

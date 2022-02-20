@@ -1,3 +1,4 @@
+using System.IO;
 namespace MoogleEngine;
 
 internal static class Utils
@@ -25,7 +26,7 @@ internal static class Utils
                 continue;
             }
 
-            result[i] = rawDocument[i] / maxFreq;
+            result[i] = (double)rawDocument[i] / maxFreq;
         }
 
         return result;
@@ -95,34 +96,73 @@ internal static class Utils
 
         return result;
     }
-    private static bool CharFilter(char c) => char.IsLetterOrDigit(c);
-    private static char CharMap(char c) => c.ToString().Normalize(System.Text.NormalizationForm.FormD)[0];
+    internal static bool CharFilter(char c)
+    => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c);
+    internal static char CharMap(char c) => c.ToString().ToLower().Normalize(System.Text.NormalizationForm.FormD)[0];
     public static void ForEachFilteredParagraphInFile(string filePath, Action<string> action)
     => SeparateTextInFile(filePath, c => c == '\n', action, CharFilter, CharMap);
     public static void ForEachRawParagraphInFile(string filePath, Action<string> action)
     => SeparateTextInFile(filePath, c => c == '\n', action, c => true, c => c);
     public static void ForEachWordInFile(string filePath, Action<string> action)
     => SeparateTextInFile(filePath, char.IsWhiteSpace, action, CharFilter, CharMap);
-    public static void SeparateTextInFile(string filePath, Func<char, bool> isSeparator, Action<string> action, Func<char, bool> filter, Func<char, char> map)
+    public static void SeparateTextInFile(
+        string filePath, Func<char, bool> isSeparator, Action<string> action,
+        Func<char, bool> filter, Func<char, char> map)
     {
         using StreamReader reader = new(filePath);
 
         string currentWord = "";
         while (!reader.EndOfStream)
         {
-            char c = map(char.ToLower((char)reader.Read()));
+            char input = (char)reader.Read();
+            char c = map(input);
 
-            if (!filter(c))
-                continue;
             if (isSeparator(c))
             {
-                if (currentWord == "")
+                currentWord = currentWord.Trim();
+
+                if (currentWord != "")
                     action(currentWord);
 
                 currentWord = "";
             }
-            else
+            else if (filter(c))
                 currentWord += c;
         }
+
+        currentWord = currentWord.Trim();
+
+        if (currentWord != "")
+            action(currentWord);
+    }
+    public static void SeparateTextInString(
+        string str, Func<char, bool> isSeparator, Action<string> action,
+        Func<char, bool> filter, Func<char, char> map)
+    {
+        using StringReader reader = new(str);
+
+        string currentWord = "";
+        while (reader.Peek() != -1)
+        {
+            currentWord = currentWord.Trim();
+
+            char input = (char)reader.Read();
+            char c = map(input);
+
+            if (isSeparator(c))
+            {
+                if (currentWord != "")
+                    action(currentWord);
+
+                currentWord = "";
+            }
+            else if (filter(c))
+                currentWord += c;
+        }
+
+        currentWord = currentWord.Trim();
+
+        if (currentWord != "")
+            action(currentWord);
     }
 }

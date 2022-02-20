@@ -1,4 +1,6 @@
-﻿using System.Reflection.Metadata;
+﻿using System.Linq;
+using System.Runtime.Serialization;
+using System.Reflection.Metadata;
 using System.Net.Mime;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
@@ -11,6 +13,8 @@ namespace MoogleEngine;
 public static class Moogle
 {
     const int CHARACTERS_PER_SNIPPET = 256;
+    const int MIN_RESULTS = 10;
+    const int MAX_LEVENSHTEIN_DEPTH = 2;
     const int LAST_SNIPPET_WORD_MAX_LENGTH = 16;
     static readonly string[] vocabulary;
     static readonly string[] corpusFiles;
@@ -106,13 +110,13 @@ public static class Moogle
         // query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         //                             .Where(w => vocabulary.Contains(w)).ToArray();
 
-        //TODO: Search for alternatives in input
         if (queryTerms.Count == 0)
             return new SearchResult();
 
         System.Console.WriteLine("Split terms");
 
         Dictionary<string, int> rawQuery = new();
+        Dictionary<string, int> originalQueryTerms = new();
 
         for (int i = 0; i < queryTerms.Count; i++)
         {
@@ -129,11 +133,29 @@ public static class Moogle
             // filter stars out of the term
             queryTerms[i] = term[starCount..];
 
-            if (vocabulary.Contains(queryTerms[i]))
+            if (queryTerms[i] != "" && vocabulary.Contains(queryTerms[i]))
+            {
                 if (rawQuery.ContainsKey(queryTerms[i]))
                     rawQuery[queryTerms[i]] += 1 + starCount;
                 else
                     rawQuery.Add(queryTerms[i], 1 + starCount);
+
+                if (!originalQueryTerms.ContainsKey(queryTerms[i]))
+                    originalQueryTerms.Add(queryTerms[i], 1 + starCount);
+                else
+                    originalQueryTerms[queryTerms[i]] = 1 + starCount;
+            }
+            else if (queryTerms[i] != "")
+            {
+                if (!originalQueryTerms.ContainsKey(queryTerms[i]))
+                    originalQueryTerms.Add(queryTerms[i], 1 + starCount);
+                else
+                    originalQueryTerms[queryTerms[i]] = 1 + starCount;
+
+                queryTerms.RemoveAt(i);
+                i--;
+                continue;
+            }
             else
             {
                 queryTerms.RemoveAt(i);
@@ -141,13 +163,112 @@ public static class Moogle
                 continue;
             }
         }
-        return new SearchResult(StrictQuery(rawQuery.ToArray()));
-    }
+        var firstSearch = StrictQuery(rawQuery.ToArray());
+        List<SearchItem> searchResult = new(firstSearch.Item1);
+        // Dictionary of queries and their resulting cosines
+        Dictionary<List<string>, double> bestCosines = new();
+        bestCosines.Add(queryTerms, firstSearch.maxCosine);
 
+        if (searchResult.Count < MIN_RESULTS)
+        {
+            List<string> queryKeys = new(originalQueryTerms.Keys);
+
+            System.Console.WriteLine("Insufficient results, looking for query variations...");
+            for (int i = 1; i <= MAX_LEVENSHTEIN_DEPTH; i++)
+            {
+                string[][] termsVariations = new string[queryKeys.Count][];
+
+                for (int e = 0; e < termsVariations.Length; e++)
+                {
+                    termsVariations[e] = GetAllTermVariationsInVocabulary(queryKeys[e], vocabulary, i);
+
+                    System.Console.WriteLine($"{termsVariations[e].Length} variations for term {e}");
+                }
+
+                System.Console.WriteLine("Calculating total query variations...");
+
+                // Here we compute how many variations there are in total, we also store the total variations for 
+                // each term in a one-dimensional array.
+                int totalVariations = 1;
+                int[] variationsLengths = new int[termsVariations.Length];
+                for (int e = 0; e < termsVariations.Length; e++)
+                {
+                    variationsLengths[e] = termsVariations[e].Length;
+                    totalVariations *= variationsLengths[e];
+                }
+
+                if (totalVariations == 1)
+                {
+                    System.Console.WriteLine("No variations found for depth = " + i);
+                    continue;
+                }
+
+                int[][] allQueryVariations = GetAllArrayCombinations(variationsLengths);
+
+                System.Console.WriteLine("Got all query variations, total " + allQueryVariations.Length);
+
+                Dictionary<string, int>[] queryVariations = new Dictionary<string, int>[totalVariations];
+                for (int e = 0; e < totalVariations; e++)
+                {
+                    queryVariations[e] = new Dictionary<string, int>();
+
+                    for (int o = 0; o < queryKeys.Count; o++)
+                        queryVariations[e].Add(termsVariations[o][allQueryVariations[e][o]], originalQueryTerms[queryKeys[o]]);
+                }
+
+
+                System.Console.WriteLine("Searching with variation queries...");
+                List<(List<string> terms, (SearchItem[], double maxCosine))> variationSearches = new();
+                for (int e = 0; e < queryVariations.Length; e++)
+                {
+                    List<string> variationTerms = new(queryVariations[e].Keys);
+
+                    if (variationTerms.SequenceEqual(queryKeys))
+                        continue;
+
+                    variationSearches.Add((variationTerms, StrictQuery(queryVariations[e].ToArray())));
+                }
+
+                System.Console.WriteLine("Validating searches...");
+                var validSearches = variationSearches.Where(r => r.Item2.maxCosine != 0).ToArray();
+
+                validSearches = validSearches.OrderByDescending(s => s.Item2.maxCosine).ToArray();
+
+                for (int e = 0; e < validSearches.Length; e++)
+                {
+                    bestCosines.Add(validSearches[e].terms, validSearches[e].Item2.maxCosine);
+
+                    searchResult.AddRange(validSearches[e].Item2.Item1);
+                }
+
+                if (searchResult.Count >= MIN_RESULTS)
+                    break;
+
+                System.Console.WriteLine("Not enough results, going deeper...");
+            }
+        }
+
+        double maxCosine = bestCosines.Values.Max();
+        List<string> bestSearch = new();
+        foreach (var search in bestCosines)
+            if (search.Value == maxCosine)
+            {
+                bestSearch = search.Key;
+                break;
+            }
+
+        string suggestion = "";
+        if (bestSearch != queryTerms)
+        {
+            suggestion = string.Join(' ', bestSearch);
+        }
+
+        return new SearchResult(searchResult.ToArray(), suggestion);
+    }
     const double MIN_SIMILARITY = 0.01;
     // Notes:
     // Strict query assumes all terms are in the vocabulary.
-    private static SearchItem[] StrictQuery(KeyValuePair<string, int>[] terms)
+    private static (SearchItem[], double maxCosine) StrictQuery(KeyValuePair<string, int>[] terms)
     {
         Console.WriteLine("Invoked StrictQuery");
 
@@ -163,10 +284,19 @@ public static class Moogle
         Vector<double>[] documents = weightedCorpus.GetAllRows();
         double[] cosines = new double[weightedCorpus.Height];
 
-        System.Console.WriteLine("Finding cosine similarity");
+        System.Console.WriteLine("Finding cosine similarity...");
         for (int i = 0; i < cosines.Length; i++)
         {
             cosines[i] = VectorMath.GetCosineSimilarity(documents[i], weightedQuery, MIN_SIMILARITY);
+        }
+
+        System.Console.WriteLine("Computing matches...");
+
+        double maxCosine = cosines.Max();
+        if (maxCosine <= MIN_SIMILARITY)
+        {
+            System.Console.WriteLine("Found 0 matches for strict search!");
+            return (Array.Empty<SearchItem>(), 0);
         }
 
         List<SearchItem> result = new();
@@ -181,7 +311,9 @@ public static class Moogle
                 GetSnippet(weightedQuery, corpusFiles[i]),
                 (float)cosines[i]));
         }
-        return result.OrderByDescending(item => item.Score).ToArray();
+
+        System.Console.WriteLine($"Found {result.Count} matches for strict search!");
+        return (result.OrderByDescending(item => item.Score).ToArray(), maxCosine);
     }
     private static string GetSnippet(Vector<double> weightedQuery, string documentPath)
     {

@@ -166,6 +166,53 @@ internal static class Utils
             action(currentWord);
     }
 
+    public static string[] GetAllTermVariationsInVocabulary(string term, string[] vocabulary, int distance)
+    {
+        List<string> variations = new();
+        foreach (string word in vocabulary)
+            if (CalculateDLDistance(term, word) <= distance)
+                variations.Add(word);
+
+        return variations.ToArray();
+    }
+    public static int[][] GetAllArrayCombinations(in int[] lengths)
+    {
+        int totalLength = 1;
+        foreach (int length in lengths)
+            totalLength *= length;
+
+        List<int[]> result = new();
+
+        GetAllArrayCombinations(lengths, new List<int>(), ref result);
+
+        return result.ToArray();
+    }
+    private static void GetAllArrayCombinations(in int[] lengths, List<int> previousTerms, ref List<int[]> result)
+    {
+        int n = previousTerms.Count;
+
+        if (n == lengths.Length - 1)
+        {
+            int[] value = new int[lengths.Length];
+            previousTerms.CopyTo(value);
+
+            for (int i = 0; i < lengths[n]; i++)
+            {
+                value[n] = i;
+                result.Add((int[])value.Clone());
+            }
+            return;
+        }
+        else
+        {
+            for (int i = 0; i < lengths[n]; i++)
+            {
+                List<int> nextTerms = new(previousTerms);
+                nextTerms.Add(i);
+                GetAllArrayCombinations(lengths, nextTerms, ref result);
+            }
+        }
+    }
     public static int CalculateDLDistance(string a, string b)
         => CalculateDLDistance(a, b, a.Length - 1, b.Length - 1);
 
@@ -181,7 +228,7 @@ internal static class Utils
                 return CalculateDLDistance(a, b, i - 2, j - 2) + 1;
             // if there isn't a swap, and the current characters are different, then a substitution must be made.
             else
-                return CalculateDLDistance(a, b, i - 1, j - 1) + (a[i] == b[i] ? 0 : 1);
+                return CalculateDLDistance(a, b, i - 1, j - 1) + (a[i] == b[j] ? 0 : 1);
         }
         // this happens if a is longer than b
         else if (i > -1)

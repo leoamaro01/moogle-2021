@@ -165,4 +165,32 @@ internal static class Utils
         if (currentWord != "")
             action(currentWord);
     }
+
+    public static int CalculateDLDistance(string a, string b)
+        => CalculateDLDistance(a, b, a.Length - 1, b.Length - 1);
+
+    // Method for calculating Damerau–Levenshtein distance between two strings (a & b)
+    // i indicates the 0-indexed length of the current substring of a, and j of b.
+    private static int CalculateDLDistance(string a, string b, int i, int j)
+    {
+        // if both substrings still have valid lengths
+        if (i > -1 && j > -1)
+        {
+            // if there is a swap between this character and the next, it counts as a single operation in Damerau-Levenshtein.
+            if (i > 0 && j > 0 && a[i] == b[j - 1] && a[i - 1] == b[j])
+                return CalculateDLDistance(a, b, i - 2, j - 2) + 1;
+            // if there isn't a swap, and the current characters are different, then a substitution must be made.
+            else
+                return CalculateDLDistance(a, b, i - 1, j - 1) + (a[i] == b[i] ? 0 : 1);
+        }
+        // this happens if a is longer than b
+        else if (i > -1)
+            return CalculateDLDistance(a, b, i - 1, j) + 1;
+        // this happens if b is longer than a
+        else if (j > -1)
+            return CalculateDLDistance(a, b, i, j - 1) + 1;
+        // base case
+        else
+            return 0;
+    }
 }

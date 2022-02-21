@@ -174,6 +174,8 @@ internal static class Utils
     private static int[][] GetAllTermsPositionsInDocument(string documentPath, string[] terms)
     {
         List<int>[] result = new List<int>[terms.Length];
+        for (int i = 0; i < result.Length; i++)
+            result[i] = new();
 
         int wordIndex = 0;
         ForEachWordInFile(documentPath, w =>

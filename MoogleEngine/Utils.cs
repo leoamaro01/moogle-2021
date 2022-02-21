@@ -3,16 +3,6 @@ namespace MoogleEngine;
 
 internal static class Utils
 {
-    public static double GetTermFrequency(int termIndex, Vector<int> rawDocument)
-    {
-        if (termIndex < 0 || termIndex >= rawDocument.Length)
-            throw new IndexOutOfRangeException($"{nameof(termIndex)} must be greater than 0 and lower than {nameof(rawDocument)}.Length.");
-
-        if (rawDocument[termIndex] == 0) return 0;
-
-        // Term frequency is calculated by dividing the frequency of the term by the sum of the frequencies of all other terms
-        return (double)rawDocument[termIndex] / rawDocument.Max();
-    }
     public static double[] GetDocumentTermFrequency(Vector<int> rawDocument)
     {
         double[] result = new double[rawDocument.Length];
@@ -26,7 +16,7 @@ internal static class Utils
                 continue;
             }
 
-            result[i] = (double)rawDocument[i] / maxFreq;
+            result[i] = 0.5 + 0.5 * ((double)rawDocument[i] / maxFreq);
         }
 
         return result;
@@ -57,11 +47,6 @@ internal static class Utils
 
         return idfs;
     }
-    public static double GetTFIDF(int termIndex, int documentIndex, Matrix<int> rawCorpus, double? idf = null)
-        => GetTermFrequency(termIndex, rawCorpus.GetRow(documentIndex))
-            * (idf ?? GetInverseDocumentFrequency(termIndex, rawCorpus));
-    public static double[] GetDocumentTFIDF(int documentIndex, Matrix<int> rawCorpus, Vector<double>? idf = null)
-        => GetDocumentTFIDF(rawCorpus.GetRow(documentIndex), rawCorpus, idf);
     public static double[] GetDocumentTFIDF(Vector<int> document, Matrix<int>? rawCorpus = null, Vector<double>? idf = null)
     {
         if (idf == null && rawCorpus == null)
@@ -165,7 +150,49 @@ internal static class Utils
         if (currentWord != "")
             action(currentWord);
     }
+    public static int GetMinDistanceBetweenTerms(string documentPath, string[] terms)
+    {
+        int[][] positions = GetAllTermsPositionsInDocument(documentPath, terms);
+        return GetShortestPathInIndexArray(positions, 0, -1, -1);
+    }
+    private static int GetShortestPathInIndexArray(in int[][] indexArray, int depth, int max, int min)
+    {
+        if (depth >= indexArray.Length)
+            return max - min;
 
+        if (indexArray[depth].Length == 0)
+            return GetShortestPathInIndexArray(indexArray, depth + 1, max, min);
+
+        int[] distances = new int[indexArray[depth].Length];
+        for (int i = 0; i < distances.Length; i++)
+            distances[i] = GetShortestPathInIndexArray(indexArray, depth + 1,
+                            max >= 0 ? Math.Max(max, indexArray[depth][i]) : indexArray[depth][i],
+                            min >= 0 ? Math.Min(min, indexArray[depth][i]) : indexArray[depth][i]);
+
+        return distances.Min();
+    }
+    private static int[][] GetAllTermsPositionsInDocument(string documentPath, string[] terms)
+    {
+        List<int>[] result = new List<int>[terms.Length];
+
+        int wordIndex = 0;
+        ForEachWordInFile(documentPath, w =>
+        {
+            for (int i = 0; i < terms.Length; i++)
+            {
+                if (terms[i] == w)
+                {
+                    result[i] ??= new();
+                    result[i].Add(wordIndex);
+                    break;
+                }
+            }
+
+            wordIndex++;
+        });
+
+        return result.Select(l => l.ToArray()).ToArray();
+    }
     public static string[] GetAllTermVariationsInVocabulary(string term, string[] vocabulary, int distance)
     {
         List<string> variations = new();

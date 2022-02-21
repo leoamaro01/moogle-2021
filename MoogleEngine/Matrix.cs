@@ -2,7 +2,6 @@ namespace MoogleEngine
 {
     public class Matrix<T> : IEnumerable<T>
     {
-        //TODO: Support for empty matrix.
         private readonly T[] _items;
 
         public T this[int x, int y]

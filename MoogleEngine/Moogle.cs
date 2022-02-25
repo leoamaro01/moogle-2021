@@ -24,6 +24,8 @@ public static class Moogle
 
     public static async Task<SearchResult> Query(string query, SearchEngineData engineData)
     {
+        Stopwatch sw = Stopwatch.StartNew();
+
         // base data gathered from the engineData parameter to be used in search
         string[] vocabulary = engineData.vocabulary;
         string[] corpusFiles = engineData.corpusFiles;
@@ -197,10 +199,15 @@ public static class Moogle
         }
         // we make an initial search, with the filtered query, its except, mandatory and
         // nearby terms arrays
+
+        System.Console.WriteLine($"Filtered query in {sw.ElapsedMilliseconds}ms");
+
         var firstSearch = await StrictQuery(
             rawQuery.ToArray(), mandatoryTerms.ToArray(), exceptTerms.ToArray(),
             engineData, nearbySequences.Select(l => l.ToArray()).ToArray());
         List<SearchItem> searchResult = new(firstSearch.results);
+
+        sw.Restart();
 
         // Dictionary of queries and their resulting cosines, to rank searches 
         // if several are made
@@ -338,7 +345,11 @@ public static class Moogle
                     }
                 }
             }
+
+            System.Console.WriteLine($"Made all variation searches in {sw.ElapsedMilliseconds}ms");
         }
+
+        sw.Stop();
 
         // now we look for the best search among all that were made, so we suggest it to the user as a better search
         double maxCosine = bestCosines.Values.Max();
@@ -365,6 +376,8 @@ public static class Moogle
         string[] exceptTerms, SearchEngineData engineData,
         string[][]? nearbyTerms = null, string[]? filteredTitles = null)
     {
+        Stopwatch sw = Stopwatch.StartNew();
+
         string[] vocabulary = engineData.vocabulary;
         string[] corpusFiles = engineData.corpusFiles;
         Matrix<double> weightedCorpus = engineData.weightedCorpus;
@@ -388,6 +401,9 @@ public static class Moogle
         System.Console.WriteLine("Weighting query...");
         Vector<double> weightedQuery = new(GetDocumentTFIDF(rawQuery, idf: corpusIDF));
 
+        System.Console.WriteLine($"Weighted query in {sw.ElapsedMilliseconds}ms");
+        sw.Restart();
+
         Vector<double>[] documents = weightedCorpus.GetAllRows();
         List<(int docIndex, double cosine)> cosines = new();
 
@@ -403,6 +419,9 @@ public static class Moogle
                     cosines.Add((i, VectorMath.GetCosineSimilarity(documents[i], weightedQuery, MIN_SIMILARITY)));
             }
         });
+
+        System.Console.WriteLine($"Computed cosine similarity in {sw.ElapsedMilliseconds}ms");
+        sw.Restart();
 
         if (nearbyTerms != null)
         {
@@ -421,8 +440,11 @@ public static class Moogle
                                          cosines[i].cosine * (1 + (1 / closestDistance)));
                     }
             });
+
+            System.Console.WriteLine($"Computed nearby terms in {sw.ElapsedMilliseconds}ms");
         }
 
+        sw.Restart();
         System.Console.WriteLine("Computing matches...");
 
         double maxCosine = cosines.Max(s => s.cosine);
@@ -483,7 +505,7 @@ public static class Moogle
                 (float)cosines[i].cosine));
         }
 
-        System.Console.WriteLine($"Found {result.Count} matches for strict search!");
+        System.Console.WriteLine($"Found {result.Count} matches for strict search in {sw.ElapsedMilliseconds}ms!");
         // returning results ordered by score.
         return (result.OrderByDescending(item => item.Score).ToArray(), maxCosine);
     }

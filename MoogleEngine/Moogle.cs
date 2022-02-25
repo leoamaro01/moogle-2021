@@ -22,94 +22,14 @@ public static class Moogle
     // by more than this amount, more paragraphs may be added.
     const int STANDARD_PARAGRAPH_LENGTH = 64;
 
-    // this will contain all distinct words in the corpus
-    static readonly string[] vocabulary;
-
-    // this will contain every file path in the corpus
-    static readonly string[] corpusFiles;
-
-    // this is a mxn matrix, where m is the number of files and n the number of terms in the vocabulary
-    // it contains the tf-idf weight of each word in each document
-    static readonly Matrix<double> weightedCorpus;
-
-    // the idf of a term is global and independent of any document, so this vector stores the idf of every term
-    static readonly Vector<double> corpusIDF;
-
-    // static constructor where all weighting and indexing happens.
-    static Moogle()
+    public static async Task<SearchResult> Query(string query, SearchEngineData engineData)
     {
-        Console.WriteLine("Starting...");
-        Stopwatch stopwatch = new();
-        stopwatch.Start();
-        // Perform document Indexing and Weighting
+        // base data gathered from the engineData parameter to be used in search
+        string[] vocabulary = engineData.vocabulary;
+        string[] corpusFiles = engineData.corpusFiles;
+        Matrix<double> weightedCorpus = engineData.weightedCorpus;
+        Vector<double> corpusIDF = engineData.corpusIDF;
 
-        // First we define a placeholder for the vocabulary.
-        List<string> tempVocabulary = new();
-
-        // Then we get the base "moogle-2021" directory, where the "Content" directory is located
-        DirectoryInfo baseDir = Directory.GetParent(Directory.GetCurrentDirectory())
-                    ?? throw new IOException("Unexpected error, parent directory not found, are you starting"
-                    + "Moogle Server from a non-standard location?");
-
-        // Now we get all files from the "Content" folder, this will be the corpus.
-        corpusFiles = Directory.GetFiles(Path.Join(baseDir.FullName, "Content"), "*.txt");
-
-        Dictionary<int, int>[] rawFrequenciesDicts = new Dictionary<int, int>[corpusFiles.Length];
-
-        // Now we all distinct words to the vocabulary.
-        for (int i = 0; i < corpusFiles.Length; i++)
-        {
-            Console.WriteLine($"Reading... ({(float)i / corpusFiles.Length * 100}%) {tempVocabulary.Count} words found.");
-
-            rawFrequenciesDicts[i] = new();
-
-            ForEachWordInFile(corpusFiles[i],
-                       word =>
-                       {
-                           if (!tempVocabulary.Contains(word))
-                           {
-                               tempVocabulary.Add(word);
-                               rawFrequenciesDicts[i].Add(tempVocabulary.Count - 1, 1);
-                           }
-                           else
-                           {
-                               int termIndex = tempVocabulary.IndexOf(word);
-                               if (rawFrequenciesDicts[i].ContainsKey(termIndex))
-                                   rawFrequenciesDicts[i][termIndex]++;
-                               else
-                                   rawFrequenciesDicts[i].Add(termIndex, 1);
-                           }
-                       }
-                       );
-        }
-        Console.WriteLine("Read all files in " + stopwatch.ElapsedMilliseconds + "ms");
-        stopwatch.Restart();
-
-        vocabulary = tempVocabulary.ToArray();
-
-        // The raw corpus is a matrix that contains the frequency of every term in every document.
-        Matrix<int> rawCorpus = new(vocabulary.Length, corpusFiles.Length);
-
-        for (int i = 0; i < rawCorpus.Height; i++)
-            for (int e = 0; e < rawCorpus.Width; e++)
-            {
-                if (rawFrequenciesDicts[i].ContainsKey(e))
-                    rawCorpus[e, i] = rawFrequenciesDicts[i][e];
-                else
-                    rawCorpus[e, i] = 0;
-            }
-
-        Console.WriteLine("Created raw corpus in " + stopwatch.ElapsedMilliseconds + "ms");
-        stopwatch.Restart();
-        // Now we compute weights to every term in every document using TF-IDF weighting.
-        corpusIDF = new Vector<double>(GetCorpusIDF(rawCorpus));
-        weightedCorpus = GetCorpusTFIDF(rawCorpus, idf: corpusIDF);
-
-        stopwatch.Stop();
-        Console.WriteLine("Weighted corpus in " + stopwatch.ElapsedMilliseconds + "ms");
-    }
-    public static SearchResult Query(string query)
-    {
         // This array contains operators to be allowed in the query, apart from the usual numbers and letters
         char[] operators = { '*', '!', '^', '~' };
         Console.WriteLine($"Searched {query}");
@@ -123,8 +43,8 @@ public static class Moogle
                     {
                         queryTerms.Add(word);
                     },
-            filter: c => CharFilter(c) || operators.Contains(c),
-            map: CharMap);
+            filter: c => StandardCharFilter(c) || operators.Contains(c),
+            map: StandardCharMap);
 
         // if our query is not valid, return an empty result
         if (queryTerms.Count == 0)
@@ -164,8 +84,10 @@ public static class Moogle
                 }
                 lastTermWasTilde = true;
 
+                // onTildeStreak is used for grouping several tilde-separated terms
                 if (!onTildeStreak)
                 {
+                    // if we are starting a new streak, add the term before the tilde to the streak
                     onTildeStreak = true;
                     nearbySequences.Add(new List<string>()
                     {
@@ -173,13 +95,14 @@ public static class Moogle
                     });
                 }
 
+                // remove the tilde from the query
                 queryTerms.RemoveAt(i);
                 i--;
                 continue;
             }
             // the star operator is a prefix operator, which increases the frequency of any term,
             // therefore increasing its relevance in the search.
-            int starCount = 0;
+            int starCount = 1;
             if (term.StartsWith('*'))
                 foreach (char c in term)
                     if (c == '*')
@@ -195,20 +118,27 @@ public static class Moogle
                 foreach (char o in operators)
                     term = term.Replace(o.ToString(), "");
 
+                // remove the unwanted term from the query
                 queryTerms.RemoveAt(i);
 
+                // if the item is in the vocabulary, and we didn't register it already,
+                // add it to the exceptTerms list.
                 if (term != "" && vocabulary.Contains(term) && !exceptTerms.Contains(term))
                     exceptTerms.Add(term);
 
                 i--;
                 continue;
             }
+
+            // the ^ operator is used when a term (or it's variations) must appear in any
+            // document searched.
             if (term.StartsWith('^'))
             {
                 //filter operators out of the term
                 foreach (char o in operators)
                     term = term.Replace(o.ToString(), "");
 
+                // if we haven't already registered this term as mandatory, register it
                 if (term != "" && !mandatoryTerms.Contains(term))
                     mandatoryTerms.Add(term);
             }
@@ -221,23 +151,27 @@ public static class Moogle
 
             if (queryTerms[i] != "" && vocabulary.Contains(queryTerms[i]))
             {
-                // if the resulting term wasn't actually made of stars, and it is in the vocabulary, we shall add it
+                // if the resulting term was valid, and it is in the vocabulary, we should add it
                 // to the search that will be performed.
                 if (rawQuery.ContainsKey(queryTerms[i]))
-                    rawQuery[queryTerms[i]] += 1 + starCount;
+                    rawQuery[queryTerms[i]] += starCount;
                 else
-                    rawQuery.Add(queryTerms[i], 1 + starCount);
+                    rawQuery.Add(queryTerms[i], starCount);
 
+                // also add it to the originalTerms
                 if (!originalQueryTerms.ContainsKey(queryTerms[i]))
-                    originalQueryTerms.Add(queryTerms[i], 1 + starCount);
+                    originalQueryTerms.Add(queryTerms[i], starCount);
                 else
-                    originalQueryTerms[queryTerms[i]] = 1 + starCount;
+                    originalQueryTerms[queryTerms[i]] += starCount;
 
+                // if we are on a tilde streak, and the last term was a tilde
+                // add the current term to the current sequence
                 if (onTildeStreak && lastTermWasTilde)
                 {
                     nearbySequences[^1].Add(term);
                     lastTermWasTilde = false;
                 }
+                // if the last term wasn't a tilde, break the tilde streak
                 else
                     onTildeStreak = false;
             }
@@ -255,23 +189,28 @@ public static class Moogle
             }
             else
             {
+                // remove the term if invalid.
                 queryTerms.RemoveAt(i);
                 i--;
                 continue;
             }
         }
-        var firstSearch = StrictQuery(
+        // we make an initial search, with the filtered query, its except, mandatory and
+        // nearby terms arrays
+        var firstSearch = await StrictQuery(
             rawQuery.ToArray(), mandatoryTerms.ToArray(), exceptTerms.ToArray(),
-             nearbySequences.Select(l => l.ToArray()).ToArray());
+            engineData, nearbySequences.Select(l => l.ToArray()).ToArray());
         List<SearchItem> searchResult = new(firstSearch.results);
 
-        // Dictionary of queries and their resulting cosines, to rank searches if several are made
+        // Dictionary of queries and their resulting cosines, to rank searches 
+        // if several are made
         Dictionary<List<string>, double> bestCosines = new();
         bestCosines.Add(queryTerms, firstSearch.maxCosine);
 
         // If the initial search doesn't render enough results, more searches must be made
         if (searchResult.Count < MIN_RESULTS)
         {
+            // lets store the original query terms in a list, for ease of access
             List<string> queryKeys = new(originalQueryTerms.Keys);
 
             // save mandatory terms as a boolean mask, since variations of mandatory terms must be mandatory
@@ -291,13 +230,15 @@ public static class Moogle
 
                 System.Console.WriteLine("Calculating term variations...");
 
+                // here we compute all variations in the vocabulary for every term
                 for (int e = 0; e < termsVariations.Length; e++)
                     termsVariations[e] = GetAllTermVariationsInVocabulary(queryKeys[e], vocabulary, i);
 
                 System.Console.WriteLine("Calculating total query variations...");
 
-                // Here we compute how many variations there are in total, we also store the amouont of variations for 
-                // each term in a one-dimensional array.
+                // Here we compute how many variations there are in total, 
+                // we also store the amount of variations for 
+                // each term and in a one-dimensional array.
                 int totalVariations = 1;
                 int[] variationsLengths = new int[termsVariations.Length];
                 for (int e = 0; e < termsVariations.Length; e++)
@@ -367,6 +308,7 @@ public static class Moogle
                     }).ToList();
 
                 System.Console.WriteLine("Searching with variation queries...");
+                // now we search with each query variation until we have enough results
                 for (int e = 0; e < queryVariations.Count && searchResult.Count < MIN_RESULTS; e++)
                 {
                     // these are the terms of the current variation
@@ -384,9 +326,9 @@ public static class Moogle
                     // the filter is applied so the search doesn't contain repeated items
                     string[] titlesFilter = searchResult.Select(item => item.Title).ToArray();
                     // The search is performed with the current variation and filters
-                    var search = StrictQuery(
+                    var search = await StrictQuery(
                         queryVariations[e].ToArray(), mandatoryVariations.ToArray(),
-                        exceptTerms.ToArray(), filteredTitles: titlesFilter);
+                        exceptTerms.ToArray(), engineData, filteredTitles: titlesFilter);
 
                     if (search.maxCosine != 0)
                     {
@@ -418,10 +360,16 @@ public static class Moogle
 
     // Notes:
     // Strict query assumes all terms are in the vocabulary.
-    private static (SearchItem[] results, double maxCosine) StrictQuery(
+    private static async Task<(SearchItem[] results, double maxCosine)> StrictQuery(
         KeyValuePair<string, int>[] terms, string[] mandatoryTerms,
-        string[] exceptTerms, string[][]? nearbyTerms = null, string[]? filteredTitles = null)
+        string[] exceptTerms, SearchEngineData engineData,
+        string[][]? nearbyTerms = null, string[]? filteredTitles = null)
     {
+        string[] vocabulary = engineData.vocabulary;
+        string[] corpusFiles = engineData.corpusFiles;
+        Matrix<double> weightedCorpus = engineData.weightedCorpus;
+        Vector<double> corpusIDF = engineData.corpusIDF;
+
         // StrictQuery searches all documents (except those in the filter) to check their relevance against some query
         Console.WriteLine("Invoked StrictQuery");
 
@@ -444,26 +392,35 @@ public static class Moogle
         List<(int docIndex, double cosine)> cosines = new();
 
         System.Console.WriteLine("Finding cosine similarity...");
-        for (int i = 0; i < documents.Length; i++)
+
+        await Task.Run(() =>
         {
-            // if the document isn't filtered, calculate the cosine similarity between 
-            // the query and the document.
-            if (!filteredTitles.Contains(Path.GetFileNameWithoutExtension(corpusFiles[i])))
-                cosines.Add((i, VectorMath.GetCosineSimilarity(documents[i], weightedQuery, MIN_SIMILARITY)));
-        }
+            for (int i = 0; i < documents.Length; i++)
+            {
+                // if the document isn't filtered, calculate the cosine similarity between 
+                // the query and the document.
+                if (!filteredTitles.Contains(Path.GetFileNameWithoutExtension(corpusFiles[i])))
+                    cosines.Add((i, VectorMath.GetCosineSimilarity(documents[i], weightedQuery, MIN_SIMILARITY)));
+            }
+        });
 
         if (nearbyTerms != null)
         {
             // search score will be scaled up to 1.5x acording to the minimal distance between requested terms
-            for (int i = 0; i < cosines.Count; i++)
-                for (int e = 0; e < nearbyTerms.Length; e++)
-                {
-                    int closestDistance = GetMinDistanceBetweenTerms(corpusFiles[cosines[i].docIndex], nearbyTerms[e]);
+            // since this is a potentially heavy operation, it is implemented as an 
+            // async method so the page UI isn't blocked
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < cosines.Count; i++)
+                    for (int e = 0; e < nearbyTerms.Length; e++)
+                    {
+                        int closestDistance = GetMinDistanceBetweenTerms(corpusFiles[cosines[i].docIndex], nearbyTerms[e]);
 
-                    if (closestDistance != 0)
-                        cosines[i] = (cosines[i].docIndex,
-                                     cosines[i].cosine * (1 + 0.5 * (1 / closestDistance)));
-                }
+                        if (closestDistance != 0)
+                            cosines[i] = (cosines[i].docIndex,
+                                         cosines[i].cosine * (1 + (1 / closestDistance)));
+                    }
+            });
         }
 
         System.Console.WriteLine("Computing matches...");
@@ -485,6 +442,9 @@ public static class Moogle
             if (cosines[i].cosine <= MIN_SIMILARITY)
                 continue;
 
+            // here we take care of mandatory and except terms
+            // every mandatory term must appear in every document
+            // and no except term can appear in any document.
             if (mandatoryTerms.Length > 0 || exceptTerms.Length > 0)
             {
                 bool skipDoc = false;
@@ -519,7 +479,7 @@ public static class Moogle
             // add all relevant results to a list
             result.Add(new SearchItem(
                 Path.GetFileNameWithoutExtension(corpusFiles[cosines[i].docIndex]),
-                GetSnippet(weightedQuery, corpusFiles[cosines[i].docIndex]),
+                GetSnippet(weightedQuery, corpusFiles[cosines[i].docIndex], engineData),
                 (float)cosines[i].cosine));
         }
 
@@ -527,8 +487,15 @@ public static class Moogle
         // returning results ordered by score.
         return (result.OrderByDescending(item => item.Score).ToArray(), maxCosine);
     }
-    private static string GetSnippet(Vector<double> weightedQuery, string documentPath)
+
+    private static string GetSnippet(Vector<double> weightedQuery, string documentPath,
+    in SearchEngineData engineData)
     {
+        string[] vocabulary = engineData.vocabulary;
+        string[] corpusFiles = engineData.corpusFiles;
+        Matrix<double> weightedCorpus = engineData.weightedCorpus;
+        Vector<double> corpusIDF = engineData.corpusIDF;
+
         // This list contains all valid paragraphs in the document
         List<string> paragraphs = new();
         ForEachFilteredParagraphInFile(documentPath, p =>
@@ -578,7 +545,7 @@ public static class Moogle
 
         // Now we iterate through the best paragraphs and add them to the snippet
         int currentSnippetLength = 0;
-        string currentSnippet = "";
+        string currentSnippet = "... ";
         for (int i = 0; i < rawParagraphs.Count && currentSnippetLength <= CHARACTERS_PER_SNIPPET - STANDARD_PARAGRAPH_LENGTH; i++)
         {
             string paragraph = rawParagraphs[i];
@@ -598,15 +565,16 @@ public static class Moogle
                     cutParagraph += paragraph[e];
                 }
 
-                cutParagraph += " (...)";
+                cutParagraph += " ... ";
 
                 currentSnippet += cutParagraph;
 
                 return currentSnippet;
             }
+            // if it is short then just add it to the snippet
             else
             {
-                currentSnippet += paragraph + " (...) ";
+                currentSnippet += paragraph + " ... ";
                 currentSnippetLength += paragraph.Length;
             }
         }

@@ -4,6 +4,8 @@
 
 <h1>🔍 Moogle!</h1>
 
+<!-- this was changed to a form, so it could easily accept pressing Enter on
+the input field for searching the query -->
 <form @onsubmit="RunQuery">
     <input class="p-1 my-4" @bind="query" placeholder="Introduzca su búsqueda">
     <input type="submit" class="btn btn-primary" value="🔍 Buscar">
@@ -12,9 +14,30 @@
 @if (!string.IsNullOrEmpty(result.Suggestion))
 {
     <div class="suggestion">
-        <p>¿Quisiste decir <strong><a href="#">@result.Suggestion</a></strong>?</p>
+    <p>¿Quisiste decir <strong>
+            <!-- a new method was defined here for when the suggestion was clicked, 
+                it would search the suggestion text -->
+            <a href="#" @onclick="SearchSuggestion">@result.Suggestion</a>
+        </strong>?</p>
+</div>
+}
+
+<!-- These info texts are shown when the engine is performing certain operations.
+Made so it was visible when a search (or indexing) was being made-->
+@if (indexing || searching)
+{
+    <div class="info">
+    @if (indexing)
+        {
+            <p>Creando base de datos, esto solo se realiza una vez, por favor espere...</p>
+        }
+        @if (searching)
+        {
+            <p>Buscando, por favor espere...</p>
+        }
     </div>
 }
+
 
 <ul class="results">
     @foreach (var item in result.Items())
@@ -22,18 +45,52 @@
         <li>
             <div class="item">
                 <p class="title">@item.Title</p>
-                <p>... @item.Snippet ...</p>
+                <p>@item.Snippet</p>
             </div>
         </li>
     }
 </ul>
 
 @code {
-    private string query = "";
     private SearchResult result = new SearchResult();
+    private string query = "";
+    // state booleans:
+    // firstRun is used so that indexing happens before any search is made
+    // indexing and searching are used for displaying the info texts.
+    private bool firstRun = true;
+    private bool indexing = false;
+    private bool searching = false;
 
-    private void RunQuery()
+    // local variable containing the data generated to be used in searching
+    private SearchEngineData engineData;
+
+    private async void RunQuery()
     {
-        result = Moogle.Query(query);
+        if (firstRun)
+        {
+            firstRun = false;
+            indexing = true;
+
+            // Some heavy-working methods are specified as async so they don't block the page
+            engineData = await SearchEngineData.GenerateData();
+
+            indexing = false;
+        }
+
+        searching = true;
+
+        // StateHasChanged is used as with async methods several page Redraws must be made
+        // because of the (not so real) pauses the await keyword causes.
+        StateHasChanged();
+
+        result = await Moogle.Query(query, engineData);
+
+        searching = false;
+        StateHasChanged();
+    }
+    private void SearchSuggestion()
+    {
+        query = result.Suggestion;
+        RunQuery();
     }
 }

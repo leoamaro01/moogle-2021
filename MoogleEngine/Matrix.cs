@@ -2,8 +2,13 @@ namespace MoogleEngine
 {
     public class Matrix<T> : IEnumerable<T>
     {
+        // NOTE: MATRIX USES (X; Y) COORDINATES, X BEING THE HORIZONTAL AXIS
+        // (COLUMN) AND Y THE VERTICAL AXIS (ROW)
+
+        // for performance reasons, matrix are stored as one-dimensional arrays
         private readonly T[] _items;
 
+        // though for convinience can be accessed as two-dimensional arrays
         public T this[int x, int y]
         {
             get => _items[(Width * y) + x];
@@ -15,6 +20,8 @@ namespace MoogleEngine
             Width = items.GetLength(0);
 
             _items = new T[Width * items.GetLength(1)];
+
+            // initialising the matrix in a one dimensional array in a convenient way
 
             for (int i = 0; i < _items.Length; i++)
             {
@@ -29,7 +36,8 @@ namespace MoogleEngine
             _items = new T[width * height];
         }
 
-        public int Height => _items.Length / Width;
+        // Only width is stored, height is obtained from the width
+        public int Height => Width == 0 ? 0 : _items.Length / Width;
         public int Width { get; }
 
         public Vector<T> GetRow(int rowIndex)
@@ -41,6 +49,7 @@ namespace MoogleEngine
 
             int internalRowIndex = rowIndex * Width;
 
+            // range operator goes brr~
             return new Vector<T>(_items[internalRowIndex..(internalRowIndex + Width)]);
         }
         public Vector<T> GetColumn(int colIndex)

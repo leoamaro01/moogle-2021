@@ -6,3 +6,13 @@
     font-size: large;
     font-weight: bold;
 }
+
+.info {
+    transform: scale(1.0, 1.0);
+    animation: scaleanimation 1s ease-in-out 400ms infinite forwards;
+}
+@keyframes scaleanimation{
+    0% { transform: scale(1.0, 1.0); }
+    50% { transform: scale(1.05, 1.05); }
+    100% { transform: scale(1.0, 1.0); }
+}

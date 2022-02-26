@@ -44,7 +44,7 @@ Made so it was visible when a search (or indexing) was being made-->
     {
         <li>
             <div class="item">
-                <p class="title">@item.Title</p>
+                <p class="title"><a href="#" @onclick="@(e => OpenFile(item.Title))">@item.Title</a></p>
                 <p>@item.Snippet</p>
             </div>
         </li>
@@ -92,5 +92,19 @@ Made so it was visible when a search (or indexing) was being made-->
     {
         query = result.Suggestion;
         RunQuery();
+    }
+    private void OpenFile(string fileTitle)
+    {
+        try
+        {
+            DirectoryInfo? baseDir = Directory.GetParent(Directory.GetCurrentDirectory());
+            string contentFolder = Path.Join(baseDir?.FullName, "Content");
+            string fullFileName = Path.Join(contentFolder, fileTitle + ".txt");
+            var process = System.Diagnostics.Process.Start(fullFileName);
+        }
+        catch
+        {
+            System.Console.WriteLine("Couldn't open file...");
+        }
     }
 }
